@@ -45,6 +45,9 @@ The system uses **hybrid retrieval (BM25 + dense embeddings)** to provide **accu
 
 ## 🏗️ System Architecture
 
+## 🏗️ System Architecture
+
+```mermaid
 graph TD
     User[User Query] --> Router{Query Router}
     
@@ -66,6 +69,7 @@ graph TD
     TopK --> Prompt[Prompt Builder]
     Prompt --> LLM[LLM Generation]
     LLM --> Output[Answer with Citations]
+```
 
 ---
 
