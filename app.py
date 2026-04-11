@@ -67,7 +67,4 @@ with st.sidebar:
     st.markdown("- **Keyword:** BM25 (Sparse)")
     st.markdown("- **Reranker:** Reciprocal Rank Fusion")
     st.markdown("- **LLM:** gpt-4o-mini")
-    if not os.getenv("OPENAI_API_KEY"):
-         st.error("⚠️ OPENAI_API_KEY not found in env.")
-    else:
-         st.success("API Key configured.")
+    
