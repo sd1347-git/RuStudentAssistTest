@@ -42,9 +42,6 @@ The system uses **hybrid retrieval (BM25 + dense embeddings)** to provide **accu
 * ✅ Lightweight & low-cost (< $30)
 
 ---
-
-## 🏗️ System Architecture
-
 ## 🏗️ System Architecture
 
 ```mermaid
