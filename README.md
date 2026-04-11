@@ -45,11 +45,10 @@ The system uses **hybrid retrieval (BM25 + dense embeddings)** to provide **accu
 
 ## 🏗️ System Architecture
 
-```mermaid
 graph TD
-    User([User Query]) --> Router{Query Router}
+    User[User Query] --> Router{Query Router}
     
-    Router -->|Contacts| BM25_Contacts[BM25 Contacts Index]
+    Router -->|Contacts| BM25_Contacts[BM25 Contacts]
     Router -->|Events| Event_Filter[Event JSON Filter]
     Router -->|Requirements| BM25_Reqs[BM25 Requirements]
     Router -->|Other| Hybrid[Hybrid Search]
@@ -63,11 +62,10 @@ graph TD
     BM25_Reqs --> Fusion
     Event_Filter --> Fusion
 
-    Fusion[Rank Fusion (RRF)] --> TopK[Top-K Chunks]
+    Fusion[Rank Fusion RRF] --> TopK[Top K Chunks]
     TopK --> Prompt[Prompt Builder]
     Prompt --> LLM[LLM Generation]
-    LLM --> Output[Answer + Citations]
-```
+    LLM --> Output[Answer with Citations]
 
 ---
 
