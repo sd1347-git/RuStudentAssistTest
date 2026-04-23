@@ -821,8 +821,3 @@ Title: Supply Chain Management Major
 Supply Chain Management Curriculum Guidesheet
 Course Descriptions/Syllabus Directory
 Supply Chain Management Department
-
-arize-phoenix
-openinference-instrumentation-openai
-opentelemetry-sdk
-opentelemetry-exporter-otlp
