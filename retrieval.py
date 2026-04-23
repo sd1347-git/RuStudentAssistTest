@@ -3,7 +3,7 @@ import pickle
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
-from openinference.instrumentation import get_tracer
+from phoenix.trace import get_tracer
 tracer = get_tracer(__name__)
 
 OUTPUT_DIR = "output"
