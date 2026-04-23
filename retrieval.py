@@ -3,8 +3,14 @@ import pickle
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
-from phoenix.trace import get_tracer
-tracer = get_tracer(__name__)
+import streamlit as st
+from phoenix.otel import register
+
+tracer_provider = register(
+  project_name="RU_Student_Assistant_Test",
+)
+
+tracer = tracer_provider.get_tracer(__name__)
 
 OUTPUT_DIR = "output"
 
@@ -46,7 +52,7 @@ class Retriever:
         # Sort by RRF score descending
         sorted_indices = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
         return sorted_indices
-    @tracer.tool(name="RBS_Search")
+    @tracer.chain
     def retrieve(self, query, top_k=5, router_override=True):
         intent = self.query_router(query)
         
