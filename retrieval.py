@@ -3,8 +3,10 @@ import pickle
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
+from phoenix.trace import get_tracer
 
 OUTPUT_DIR = "output"
+tracer = get_tracer(__name__)
 
 class Retriever:
     def __init__(self):
@@ -43,7 +45,7 @@ class Retriever:
         # Sort by RRF score descending
         sorted_indices = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
         return sorted_indices
-
+    @tracer.tool(name="RBS_Search")
     def retrieve(self, query, top_k=5, router_override=True):
         intent = self.query_router(query)
         
