@@ -5,14 +5,16 @@ from generator import RAGGenerator
 from phoenix.otel import register
 from openinference.instrumentation.openai import OpenAIInstrumentor
 import os
-import subprocess
+import streamlit as st
 
-# Check if the index folder exists
-if not os.path.exists("faiss_index"): # Replace "faiss_index" with your actual index folder name
-    st.info("First-time setup: Building search index from text files...")
-    # This runs your ingest script automatically on the Streamlit server
-    subprocess.run(["python", "ingest.py"], check=True)
-    st.success("Index built successfully!")
+# No more subprocess needed! 
+# The app will just check if the folder you uploaded is there.
+if not os.path.exists("output"):
+    st.error("Index folder not found. Please ensure 'output' is uploaded to GitHub.")
+else:
+    # Initialize your retriever using the files in the output folder
+    # retriever = Retriever(index_path="output")
+    pass
 
 # Initialize Arize Phoenix Tracing
 if st.secrets.get("PHOENIX_API_KEY"):
