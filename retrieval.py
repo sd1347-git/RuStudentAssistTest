@@ -3,10 +3,11 @@ import pickle
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
-from phoenix.trace import get_tracer
+from openinference.instrumentation import get_tracer
+tracer = get_tracer(__name__)
 
 OUTPUT_DIR = "output"
-tracer = get_tracer(__name__)
+
 
 class Retriever:
     def __init__(self):
