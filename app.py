@@ -2,6 +2,18 @@ import streamlit as st
 import os
 from retrieval import Retriever
 from generator import RAGGenerator
+from phoenix.otel import register
+from openinference.instrumentation.openai import OpenAIInstrumentor
+
+# Initialize Arize Phoenix Tracing
+if st.secrets.get("PHOENIX_API_KEY"):
+    tracer_provider = register(
+        project_name="rbs-assistant-eval", # Must match the project name in Arize
+        endpoint="https://app.phoenix.arize.com/v1/traces",
+        api_key=st.secrets["PHOENIX_API_KEY"]
+    )
+    # This automatically captures all calls made via the OpenAI/Groq client
+    OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
 
 # Initialize components
 @st.cache_resource
