@@ -7,6 +7,12 @@ from openinference.instrumentation.openai import OpenAIInstrumentor
 import os
 import streamlit as st
 from phoenix.otel import register
+import uuid
+from openinference.instrumentation import using_session
+
+# Initialize a persistent session ID for the user
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
 # No more subprocess needed! 
 # The app will just check if the folder you uploaded is there.
@@ -64,22 +70,35 @@ if query:
     with st.chat_message("user"):
         st.markdown(query)
 
-    with tracer.start_as_current_span("Rutgers_Assistant_Workflow", attributes={"openinference.span.kind": "CHAIN"}) as root_span:
+    # WRAP EVERYTHING IN THE SESSION CONTEXT
+    # This ensures every trace in this 'visit' is grouped together in Arize
+    with using_session(st.session_state.session_id):
         
-        # 2. Process query
-        with st.spinner("Searching specific knowledge base..."):
-            try:
-                retriever, generator = load_system()
-            except FileNotFoundError:
-                st.error("Error: Missing index files.")
-                st.stop()
+        with tracer.start_as_current_span(
+            "Rutgers_Assistant_Workflow", 
+            attributes={
+                "openinference.span.kind": "CHAIN",
+                "session.id": st.session_state.session_id  # Manual session tag
+            }
+        ) as root_span:
+            
+            # 2. Process query
+            with st.spinner("Searching specific knowledge base..."):
+                try:
+                    retriever, generator = load_system()
+                except FileNotFoundError:
+                    st.error("Error: Missing index files.")
+                    st.stop()
                 
-            # Child Span 1: This is already traced in your retrieval.py
-            retrieved_chunks, intent = retriever.retrieve(query, top_k=5)
-        
-        with st.spinner(f"Generating answer (Router detected intent: {intent})..."):
-            # Child Span 2: This will now be automatically nested because it happens inside the 'with' block
-            answer = generator.generate_answer(query, retrieved_chunks)
+                # Child Span 1 (The wall of text you saw earlier)
+                retrieved_chunks, intent = retriever.retrieve(query, top_k=5)
+            
+            with st.spinner(f"Generating answer (Router detected intent: {intent})..."):
+                # Child Span 2 (The Chatbot Response)
+                answer = generator.generate_answer(query, retrieved_chunks)
+                
+                # Explicitly record the answer on the parent span so you can see it in the list!
+                root_span.set_attribute("output.value", answer)
 
     # 3. Bot response
     with st.chat_message("assistant"):
@@ -89,7 +108,6 @@ if query:
                 st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
     
     st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
-
 # Sidebar metrics
 with st.sidebar:
     st.header("Pipeline Info")
