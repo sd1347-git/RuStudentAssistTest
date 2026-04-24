@@ -16,3 +16,4 @@ openinference-instrumentation-openai
 opentelemetry-sdk
 opentelemetry-exporter-otlp
 opentelemetry-api
+openinference-semantic-conventions
