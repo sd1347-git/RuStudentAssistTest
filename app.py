@@ -65,7 +65,7 @@ if query:
     with st.chat_message("user"):
         st.markdown(query)
 
-    with tracer.start_as_current_span("Rutgers_Assistant_Workflow", attributes={"openinference.span.kind": "CHAIN"}) as root_span:
+    with tracer.start_as_current_span("Rutgers_Assistant_Workflow", span_kind=SpanKind.CHAIN) as root_span:
         
         # 2. Process query
         with st.spinner("Searching specific knowledge base..."):
