@@ -1,5 +1,8 @@
 import os
-from openai import OpenAI
+from openai import OpenAI# 1. Add the tracer setup at the top
+from phoenix.otel import register
+
+tracer = register(project_name="dataset-evaluator-ce7f0780fd136b682bafdec3").get_tracer(__name__)
 
 # Setup API Key for Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -31,25 +34,37 @@ class RAGGenerator:
         self.model_name = MODEL_NAME
 
     def generate_answer(self, query, retrieved_chunks):
-        if not client:
-            return "Please set the OPENAI_API_KEY environment variable to enable answer generation."
+        # 1. Start the Span
+        with tracer.start_as_current_span("Generator.generate") as span:
+            if not client:
+                return "Please set the OPENAI_API_KEY environment variable to enable answer generation."
 
-        context_parts = []
-        for i, chunk in enumerate(retrieved_chunks):
-            context_parts.append(f"--- Document {i+1} ---\n{chunk['metadata_prefix']}{chunk['text']}\n")
-        
-        context_str = "\n".join(context_parts)
-        prompt = PROMPT_TEMPLATE.format(context_str=context_str, query=query)
+            context_parts = []
+            for i, chunk in enumerate(retrieved_chunks):
+                context_parts.append(f"--- Document {i+1} ---\n{chunk['metadata_prefix']}{chunk['text']}\n")
+            
+            context_str = "\n".join(context_parts)
+            prompt = PROMPT_TEMPLATE.format(context_str=context_str, query=query)
 
-        try:
-            response = client.chat.completions.create(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            return f"Error during generation: {e}"
+            # 2. Record the inputs for your report screenshots
+            span.set_attribute("input.value", query)
+            span.set_attribute("llm.prompt", prompt) # This shows exactly what context was sent
+
+            try:
+                response = client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0
+                )
+                answer = response.choices[0].message.content
+                
+                # 3. Record the final answer
+                span.set_attribute("output.value", answer)
+                return answer
+                
+            except Exception as e:
+                span.record_exception(e) # This logs the error specifically in Phoenix
+                return f"Error during generation: {e}"
 
 if __name__ == "__main__":
     print("Run app.py to interact with the generator.")
