@@ -4,7 +4,6 @@ from retrieval import Retriever
 from generator import RAGGenerator
 from phoenix.otel import register
 from openinference.instrumentation.openai import OpenAIInstrumentor
-from phoenix.otel import register
 import uuid
 from openinference.instrumentation import using_session
 
