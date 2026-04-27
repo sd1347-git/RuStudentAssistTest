@@ -15,7 +15,7 @@ api_key = st.secrets.get("PHOENIX_API_KEY")
 
 # 2. Register ONCE. If API key exists, it goes to Cloud. If not, it stays Local.
 tracer_provider = register(
-    project_name="dataset-evaluator-ce7f0780fd136b682bafdec3",
+    project_name="RU_Student_Assistant_Test",
     endpoint="https://app.phoenix.arize.com/v1/traces" if api_key else "http://localhost:6006/v1/traces",
     api_key=api_key,
     auto_instrument=True
