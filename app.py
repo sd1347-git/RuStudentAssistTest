@@ -96,8 +96,8 @@ def get_rutgers_answer(user_query: str):
                   
                   # Child Span 1 (The wall of text you saw earlier)
                   retrieved_chunks, intent = retriever.retrieve(query, top_k=5)
-                context_text = "\n\n".join([c['text'] for c in retrieved_chunks])
-                root_span.set_attribute("retrieval.documents", context_text)
+                  context_text = "\n\n".join([c['text'] for c in retrieved_chunks])
+                  root_span.set_attribute("retrieval.documents", context_text)
               
               with st.spinner(f"Generating answer (Router detected intent: {intent})..."):
                   # Child Span 2 (The Chatbot Response)
