@@ -2,7 +2,7 @@ import os
 from openai import OpenAI# 1. Add the tracer setup at the top
 from phoenix.otel import register
 
-tracer = register(project_name="dataset-evaluator-ce7f0780fd136b682bafdec3").get_tracer(__name__)
+tracer = register(project_name="RU_Student_Assistant_Test").get_tracer(__name__)
 
 # Setup API Key for Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
