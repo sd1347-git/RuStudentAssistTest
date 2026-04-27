@@ -117,6 +117,10 @@ def get_rutgers_answer(user_query: str):
       
       st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
   return answer
+
+if query:
+    get_rutgers_answer(query)
+  
 # Sidebar metrics
 with st.sidebar:
     st.header("Pipeline Info")
