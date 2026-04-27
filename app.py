@@ -10,6 +10,13 @@ from phoenix.otel import register
 import uuid
 from openinference.instrumentation import using_session
 
+# This connects your code to your specific Arize project
+# The ID matches the "Experiment" project you created
+tracer_provider = register(
+  project_name="Experiment-a908e5ab107fc42cfb5b5614",
+  auto_instrument=True # IMPORTANT: This automatically tracks OpenAI/LangChain calls!
+)
+
 # Initialize a persistent session ID for the user
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
@@ -64,6 +71,7 @@ for msg in st.session_state.messages:
 # Chat Input
 query = st.chat_input("Ask a question (e.g. 'Who is the contact for MITA?')")
 
+def get_rutgers_answer(user_query: str):
 if query:
     # 1. User messages
     st.session_state.messages.append({"role": "user", "content": query})
@@ -108,6 +116,7 @@ if query:
                 st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
     
     st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
+return answer
 # Sidebar metrics
 with st.sidebar:
     st.header("Pipeline Info")
