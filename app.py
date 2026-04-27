@@ -4,18 +4,27 @@ from retrieval import Retriever
 from generator import RAGGenerator
 from phoenix.otel import register
 from openinference.instrumentation.openai import OpenAIInstrumentor
-import os
-import streamlit as st
 from phoenix.otel import register
 import uuid
 from openinference.instrumentation import using_session
 
-# This connects your code to your specific Arize project
-# The ID matches the "Experiment" project you created
+# --- CLEAN TRACING SETUP (REPLACE YOUR TOP SECTION) ---
+
+# 1. Get your API Key from Streamlit secrets or environment variables
+api_key = st.secrets.get("PHOENIX_API_KEY")
+
+# 2. Register ONCE. If API key exists, it goes to Cloud. If not, it stays Local.
 tracer_provider = register(
-  project_name="Experiment-a908e5ab107fc42cfb5b5614",
-  auto_instrument=True # IMPORTANT: This automatically tracks OpenAI/LangChain calls!
+    project_name="RU_Student_Assistant_Test", 
+    endpoint="https://app.phoenix.arize.com/v1/traces" if api_key else "http://localhost:6006/v1/traces",
+    api_key=api_key,
+    auto_instrument=True  # This catches OpenAI/LangChain automatically
 )
+
+OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
+
+# 3. Create the tracer tool
+tracer = tracer_provider.get_tracer(__name__)
 
 # Initialize a persistent session ID for the user
 if "session_id" not in st.session_state:
@@ -29,19 +38,6 @@ else:
     # Initialize your retriever using the files in the output folder
     # retriever = Retriever(index_path="output")
     pass
-
-# Initialize Arize Phoenix Tracing
-if st.secrets.get("PHOENIX_API_KEY"):
-    tracer_provider = register(
-        project_name="RU_Student_Assistant_Test",
-        endpoint="https://app.phoenix.arize.com/v1/traces",
-        api_key=st.secrets["PHOENIX_API_KEY"]
-    )
-    # The instrumentor needs the provider to know where to send OpenAI/Groq logs
-    OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
-    
-# Create a tracer for manual grouping
-tracer = tracer_provider.get_tracer(__name__)
 
 # Initialize components
 @st.cache_resource
@@ -100,6 +96,8 @@ def get_rutgers_answer(user_query: str):
                   
                   # Child Span 1 (The wall of text you saw earlier)
                   retrieved_chunks, intent = retriever.retrieve(query, top_k=5)
+                context_text = "\n\n".join([c['text'] for c in retrieved_chunks])
+                root_span.set_attribute("retrieval.documents", context_text)
               
               with st.spinner(f"Generating answer (Router detected intent: {intent})..."):
                   # Child Span 2 (The Chatbot Response)
