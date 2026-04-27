@@ -15,11 +15,7 @@ api_key = st.secrets.get("PHOENIX_API_KEY")
 
 # 2. Register ONCE. If API key exists, it goes to Cloud. If not, it stays Local.
 tracer_provider = register(
-    project_name="dataset-evaluator-ce7f0780fd136b682bafdec3", 
-    endpoint="https://app.phoenix.arize.com/v1/traces" if api_key else "http://localhost:6006/v1/traces",
-    api_key=api_key,
-    auto_instrument=True  # This catches OpenAI/LangChain automatically
-)
+    project_name="dataset-evaluator-ce7f0780fd136b682bafdec3",)
 
 OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
 
@@ -67,6 +63,7 @@ for msg in st.session_state.messages:
 # Chat Input
 query = st.chat_input("Ask a question (e.g. 'Who is the contact for MITA?')")
 
+@tracer.chain
 def get_rutgers_answer(user_query: str):
   if query:
       # 1. User messages
