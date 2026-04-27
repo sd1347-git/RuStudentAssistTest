@@ -72,51 +72,51 @@ for msg in st.session_state.messages:
 query = st.chat_input("Ask a question (e.g. 'Who is the contact for MITA?')")
 
 def get_rutgers_answer(user_query: str):
-if query:
-    # 1. User messages
-    st.session_state.messages.append({"role": "user", "content": query})
-    with st.chat_message("user"):
-        st.markdown(query)
-
-    # WRAP EVERYTHING IN THE SESSION CONTEXT
-    # This ensures every trace in this 'visit' is grouped together in Arize
-    with using_session(st.session_state.session_id):
-        
-        with tracer.start_as_current_span(
-            "Rutgers_Assistant_Workflow", 
-            attributes={
-                "openinference.span.kind": "CHAIN",
-                "session.id": st.session_state.session_id  # Manual session tag
-            }
-        ) as root_span:
-            
-            # 2. Process query
-            with st.spinner("Searching specific knowledge base..."):
-                try:
-                    retriever, generator = load_system()
-                except FileNotFoundError:
-                    st.error("Error: Missing index files.")
-                    st.stop()
-                
-                # Child Span 1 (The wall of text you saw earlier)
-                retrieved_chunks, intent = retriever.retrieve(query, top_k=5)
-            
-            with st.spinner(f"Generating answer (Router detected intent: {intent})..."):
-                # Child Span 2 (The Chatbot Response)
-                answer = generator.generate_answer(query, retrieved_chunks)
-                
-                # Explicitly record the answer on the parent span so you can see it in the list!
-                root_span.set_attribute("output.value", answer)
-
-    # 3. Bot response
-    with st.chat_message("assistant"):
-        st.markdown(answer)
-        with st.expander("View Retrieved Sources"):
-            for src in retrieved_chunks:
-                st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
-    
-    st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
-return answer
+  if query:
+      # 1. User messages
+      st.session_state.messages.append({"role": "user", "content": query})
+      with st.chat_message("user"):
+          st.markdown(query)
+  
+      # WRAP EVERYTHING IN THE SESSION CONTEXT
+      # This ensures every trace in this 'visit' is grouped together in Arize
+      with using_session(st.session_state.session_id):
+          
+          with tracer.start_as_current_span(
+              "Rutgers_Assistant_Workflow", 
+              attributes={
+                  "openinference.span.kind": "CHAIN",
+                  "session.id": st.session_state.session_id  # Manual session tag
+              }
+          ) as root_span:
+              
+              # 2. Process query
+              with st.spinner("Searching specific knowledge base..."):
+                  try:
+                      retriever, generator = load_system()
+                  except FileNotFoundError:
+                      st.error("Error: Missing index files.")
+                      st.stop()
+                  
+                  # Child Span 1 (The wall of text you saw earlier)
+                  retrieved_chunks, intent = retriever.retrieve(query, top_k=5)
+              
+              with st.spinner(f"Generating answer (Router detected intent: {intent})..."):
+                  # Child Span 2 (The Chatbot Response)
+                  answer = generator.generate_answer(query, retrieved_chunks)
+                  
+                  # Explicitly record the answer on the parent span so you can see it in the list!
+                  root_span.set_attribute("output.value", answer)
+  
+      # 3. Bot response
+      with st.chat_message("assistant"):
+          st.markdown(answer)
+          with st.expander("View Retrieved Sources"):
+              for src in retrieved_chunks:
+                  st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
+      
+      st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
+    return answer
 # Sidebar metrics
 with st.sidebar:
     st.header("Pipeline Info")
