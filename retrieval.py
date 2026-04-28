@@ -1,4 +1,5 @@
 import os
+import json
 import pickle
 import numpy as np
 import faiss
@@ -8,30 +9,24 @@ from opentelemetry import trace
 from openinference.semconv.trace import SpanAttributes
 from opentelemetry.trace import Status, StatusCode
 
-
 # =========================
-# Tracer (IMPORTANT: NO register() here)
+# Tracer (NO register() here — handled in app.py)
 # =========================
 tracer = trace.get_tracer(__name__)
 
-
 OUTPUT_DIR = "output"
-
 
 class Retriever:
     def __init__(self):
         self.chunk_data = pickle.load(
             open(os.path.join(OUTPUT_DIR, "chunked_data.pkl"), "rb")
         )
-
         self.bm25 = pickle.load(
             open(os.path.join(OUTPUT_DIR, "bm25_index.pkl"), "rb")
         )
-
         self.faiss_index = faiss.read_index(
             os.path.join(OUTPUT_DIR, "vector_index.faiss")
         )
-
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
 
     # =========================
@@ -97,7 +92,6 @@ class Retriever:
                                 bm25_scores[i] *= 1.5
 
                     sparse_top_n = np.argsort(bm25_scores)[::-1][:15]
-
                     bm25_span.set_attribute("retrieval.sparse.top_n", len(sparse_top_n))
 
                 # -------------------------
@@ -107,7 +101,6 @@ class Retriever:
                     emb = self.model.encode([query])
                     _, dense_top_n = self.faiss_index.search(emb, 15)
                     dense_top_n = dense_top_n[0]
-
                     vec_span.set_attribute("retrieval.dense.top_n", len(dense_top_n))
 
                 # -------------------------
@@ -117,19 +110,15 @@ class Retriever:
                     fused_indices = self.reciprocal_rank_fusion(
                         dense_top_n, sparse_top_n
                     )
-
                     final_indices = fused_indices[:top_k]
-
                     fusion_span.set_attribute("retrieval.final_k", len(final_indices))
 
                 # -------------------------
                 # Build results
                 # -------------------------
                 results = []
-
-                for i, idx in enumerate(final_indices):
+                for idx in final_indices:
                     chunk = self.chunk_data[idx]
-
                     results.append(
                         {
                             "text": chunk.get("text", ""),
@@ -141,10 +130,11 @@ class Retriever:
 
                 # -------------------------
                 # Attach documents for Phoenix RAG eval
+                # ✅ Serialized to JSON string — required by OpenTelemetry
                 # -------------------------
                 span.set_attribute(
                     "retrieval.documents",
-                    [
+                    json.dumps([
                         {
                             "id": str(i),
                             "text": r["text"],
@@ -153,7 +143,7 @@ class Retriever:
                             },
                         }
                         for i, r in enumerate(results)
-                    ],
+                    ])
                 )
 
                 span.set_status(Status(StatusCode.OK))
@@ -163,9 +153,9 @@ class Retriever:
                 span.record_exception(e)
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 return [], "error"
-                
+
 if __name__ == "__main__":
     r = Retriever()
     res, intent = r.retrieve("Who is the contact for the MITA program?")
     print(f"Router intent: {intent}")
-    print("Top result:", res[0]['title'])
+    print("Top result:", res[0]['text'])  # ✅ Fixed key name
