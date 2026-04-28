@@ -1,9 +1,14 @@
 import os
 from openai import OpenAI
 from opentelemetry import trace # Changed from phoenix.otel import register
+from phoenix.otel import register
+import streamlit as st
 
-# IMPORTANT: Just get the tracer. app.py already handled the registration.
-tracer = trace.get_tracer(__name__)
+tracer = register(
+    project_name="RU_Student_Assistant_Test",
+    endpoint="https://app.phoenix.arize.com/v1/traces",
+    api_key=st.secrets.get("PHOENIX_API_KEY")
+).get_tracer(__name__)
 
 # Setup API Key for Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
