@@ -8,17 +8,23 @@ import uuid
 from openinference.instrumentation import using_session
 from opentelemetry.trace import StatusCode
 from opentelemetry import trace as otel_trace
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-# --- CLEAN TRACING SETUP (REPLACE YOUR TOP SECTION) ---
+# 1. Initialize Phoenix for the Cloud
+api_key = st.secrets.get("PHOENIX_API_KEY")
+project_name = "RU_Student_Assistant_Test"
 
-# 1. Initialize Phoenix
 tracer_provider = register(
-    project_name="RU_Student_Assistant_Test",
-    endpoint="https://app.phoenix.arize.com/v1/traces" if st.secrets.get("PHOENIX_API_KEY") else "http://localhost:6006/v1/traces",
-    api_key=st.secrets.get("PHOENIX_API_KEY"),
+    project_name=project_name,
+    endpoint="https://app.phoenix.arize.com/v1/traces",
+    api_key=api_key,
 )
+
+# FORCE immediate export (Critical for Streamlit Cloud)
 OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
 tracer = otel_trace.get_tracer(__name__)
+
 
 # Initialize a persistent session ID for the user
 if "session_id" not in st.session_state:
@@ -116,6 +122,8 @@ def get_rutgers_answer(user_query: str):
         
         # Force the data to Phoenix immediately
         tracer_provider.force_flush()
+        import time
+        time.sleep(1) # Give the Cloud network 1 second to ship the data to Arize
         
     return answer
 
