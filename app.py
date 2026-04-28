@@ -6,15 +6,12 @@ from openinference.instrumentation import using_session
 from openinference.semconv.trace import SpanAttributes
 from retrieval import Retriever
 from generator import RAGGenerator
-import openai
-
 
 
 # Session ID
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
-client = openai.Client()
 session_id = st.session_state.session_id
 
 @st.cache_resource
