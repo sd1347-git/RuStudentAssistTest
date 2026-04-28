@@ -52,7 +52,7 @@ def get_rutgers_answer(user_query: str):
         with tracer.start_as_current_span(
             "Rutgers_Assistant_Workflow", 
             attributes={
-                "openinference.span.kind": "CHAIN",
+                "session.id": str(uuid.uuid4()),
                 "input.value": user_query,
             }
         ) as span:
@@ -67,8 +67,19 @@ def get_rutgers_answer(user_query: str):
                 
                 # Step B: Generate
                 with st.spinner("Generating Answer..."):
-                    answer = generator.generate_answer(user_query, retrieved_chunks)
-                    span.set_attribute("output.value", answer)
+                    with tracer.start_as_current_span(
+                        "Generator.generate",
+                        attributes={
+                            "openinference.span.kind": "LLM",
+                            "input.value": user_query,
+                        }
+                    ) as llm_span:
+                        
+                        answer = generator.generate_answer(user_query, retrieved_chunks)
+                        
+                        llm_span.set_attribute("output.value", answer)
+                        
+                span.set_attribute("output.value", answer)
                 
                 span.set_status(StatusCode.OK)
 
