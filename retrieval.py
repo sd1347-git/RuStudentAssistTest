@@ -10,12 +10,7 @@ from phoenix.otel import register
 # 1. DEFINE THE DIR (Crucial or the app crashes immediately)
 OUTPUT_DIR = "output" 
 
-# 2. Force it to register itself specifically for the Cloud
-tracer = register(
-    project_name="RU_Student_Assistant_Test",
-    endpoint="https://app.phoenix.arize.com/v1/traces",
-    api_key=st.secrets.get("PHOENIX_API_KEY")
-).get_tracer(__name__)
+tracer = trace.get_tracer(__name__)
 
 class Retriever:
     def __init__(self):
@@ -55,9 +50,8 @@ class Retriever:
             attributes={
                 "openinference.span.kind": "RETRIEVER",
                 "input.value": query,
-                }
-            ) as span:
-            span.set_attribute("input.value", query)
+            }
+        ) as span:
             
             intent = self.query_router(query)
             span.set_attribute("retrieval.intent", intent)
