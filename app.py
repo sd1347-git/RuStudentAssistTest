@@ -52,6 +52,7 @@ def get_rutgers_answer(user_query: str):
         with tracer.start_as_current_span(
             "Rutgers_Assistant_Workflow", 
             attributes={
+                "openinference.span.kind": "CHAIN",
                 "session.id": str(uuid.uuid4()),
                 "input.value": user_query,
             }
@@ -63,7 +64,7 @@ def get_rutgers_answer(user_query: str):
                 with st.spinner("Searching Rutgers Knowledge Base..."):
                     retrieved_chunks, intent = retriever.retrieve(user_query)
                     context_text = "\n\n".join([c['text'] for c in retrieved_chunks])
-                    span.set_attribute("retrieval.documents", context_text)
+                    
                 
                 # Step B: Generate
                 with st.spinner("Generating Answer..."):
