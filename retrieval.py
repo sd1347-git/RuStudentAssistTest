@@ -50,7 +50,13 @@ class Retriever:
       
     def retrieve(self, query, top_k=5, router_override=True):
         # This will now appear as its own "Root" in Arize
-        with tracer.start_as_current_span("Retriever.retrieve") as span:
+        with tracer.start_as_current_span(
+            "Retriever.retrieve",
+            attributes={
+                "openinference.span.kind": "RETRIEVER",
+                "input.value": query,
+                }
+            ) as span:
             span.set_attribute("input.value", query)
             
             intent = self.query_router(query)
@@ -73,7 +79,18 @@ class Retriever:
             final_indices = fused_indices[:top_k]
             results = [self.chunk_data[i] for i in final_indices]
             
-            span.set_attribute("retrieval.documents", "\n\n".join([c['text'] for c in results]))
+            documents = []
+            for i, c in enumerate(results):
+                documents.append({
+                    "document.id": str(i),
+                    "document.content": c["text"],
+                    "document.metadata": {
+                        "title": c.get("title", ""),
+                        "category": c.get("category", ""),
+                    }
+                })
+
+            span.set_attribute("retrieval.documents", documents)
             
             return results, intent
 if __name__ == "__main__":
