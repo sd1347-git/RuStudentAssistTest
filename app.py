@@ -5,12 +5,18 @@ from retrieval import Retriever
 from generator import RAGGenerator
 from phoenix.otel import register
 from opentelemetry import trace
+import uuid
 
 tracer_provider = register(    
     project_name = "RU_Student_Assistant_Test",
 )
 
 tracer = tracer_provider.get_tracer(__name__)
+
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
+session_id = st.session_state.session_id
 
 # Initialize components
 @st.cache_resource
@@ -42,11 +48,18 @@ query = st.chat_input("Ask a question (e.g. 'Who is the contact for MITA?')")
 
 @tracer.chain
 def run_rag_pipeline(query: str):
-    retriever, generator = load_system()
-    retrieved_chunks, intent = retriever.retrieve(query, top_k=5)
-    answer = generator.generate_answer(query, retrieved_chunks)
-    return answer, retrieved_chunks, intent
+    current_span = trace.get_current_span()
+    current_span.set_attribute(SpanAttributes.SESSION_ID, session_id)
+    current_span.set_attribute(SpanAttributes.INPUT_VALUE, query)
+    retriever = Retriever()
+    generator = RAGGenerator()
+    with using_session(session_id):
+        retrieved_chunks, intent = retriever.retrieve(query)
+        answer = generator.generate_answer(query, retrieved_chunks)
 
+    current_span.set_attribute(SpanAttributes.OUTPUT_VALUE, answer)
+    return answer, intent
+    
 if query:
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
