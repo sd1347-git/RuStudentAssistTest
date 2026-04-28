@@ -1,18 +1,15 @@
+# ✅ Tracing FIRST — only from tracing.py, no re-registration
 from tracing import tracer_provider, tracer
+
 import streamlit as st
-import os
+import uuid
+from opentelemetry import trace
+from openinference.instrumentation import using_session          # ✅ Added
+from openinference.semconv.trace import SpanAttributes          # ✅ Added
 from retrieval import Retriever
 from generator import RAGGenerator
-from phoenix.otel import register
-from opentelemetry import trace
-import uuid
 
-tracer_provider = register(    
-    project_name = "RU_Student_Assistant_Test",
-)
-
-tracer = tracer_provider.get_tracer(__name__)
-
+# ✅ Session ID — once per user session
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
@@ -21,13 +18,11 @@ session_id = st.session_state.session_id
 # Initialize components
 @st.cache_resource
 def load_system():
-    # Only loads once
     retriever = Retriever()
     generator = RAGGenerator()
     return retriever, generator
 
 st.set_page_config(page_title="RBS Student Life Assistant", page_icon="🛡️")
-
 st.title("Student Life Assistant for Rutgers Business School 🛡️")
 st.markdown("Ask questions about RBS contacts, events, majors, and student life! Powered by Hybrid Retrieval (FAISS + BM25) and OpenAI.")
 
@@ -51,15 +46,16 @@ def run_rag_pipeline(query: str):
     current_span = trace.get_current_span()
     current_span.set_attribute(SpanAttributes.SESSION_ID, session_id)
     current_span.set_attribute(SpanAttributes.INPUT_VALUE, query)
-    retriever = Retriever()
-    generator = RAGGenerator()
+
+    retriever, generator = load_system()                        # ✅ Use cached system
+
     with using_session(session_id):
         retrieved_chunks, intent = retriever.retrieve(query)
         answer = generator.generate_answer(query, retrieved_chunks)
 
     current_span.set_attribute(SpanAttributes.OUTPUT_VALUE, answer)
-    return answer, intent
-    
+    return answer, retrieved_chunks, intent                     # ✅ Now returns 3 values
+
 if query:
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
@@ -67,7 +63,7 @@ if query:
 
     with st.spinner("Processing..."):
         try:
-            answer, retrieved_chunks, intent = run_rag_pipeline(query)
+            answer, retrieved_chunks, intent = run_rag_pipeline(query)  # ✅ 3 values
         except FileNotFoundError:
             st.error("Missing index files. Please run `python ingest.py` first.")
             st.stop()
