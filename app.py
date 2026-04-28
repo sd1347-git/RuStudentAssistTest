@@ -3,12 +3,15 @@ import os
 from retrieval import Retriever
 from generator import RAGGenerator
 from phoenix.otel import register
+from openinference.instrumentation.openai import OpenAIInstrumentor
 
 tracer_provider = register(    
     project_name = "RU_Student_Assistant_Test",
 )
 
 tracer = tracer_provider.get_tracer(__name__)
+
+OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
 
 # Initialize components
 @st.cache_resource
@@ -39,38 +42,35 @@ for msg in st.session_state.messages:
 query = st.chat_input("Ask a question (e.g. 'Who is the contact for MITA?')")
 
 @tracer.chain
-def rag(query:str) -> str:
-    # 1. User messages
+def run_rag_pipeline(query: str):
+    retriever, generator = load_system()
+    retrieved_chunks, intent = retriever.retrieve(query, top_k=5)
+    answer = generator.generate_answer(query, retrieved_chunks)
+    return answer, retrieved_chunks, intent
+
+if query:
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
 
-    # 2. Process query
-    with st.spinner("Searching specific knowledge base..."):
+    with st.spinner("Processing..."):
         try:
-            retriever, generator = load_system()
+            answer, retrieved_chunks, intent = run_rag_pipeline(query)
         except FileNotFoundError:
-            st.error("Error: Missing index files. Please run `python ingest.py` first to process documents.")
+            st.error("Missing index files. Please run `python ingest.py` first.")
             st.stop()
-            
-        retrieved_chunks, intent = retriever.retrieve(query, top_k=5)
-    
-    with st.spinner(f"Generating answer (Router detected intent: {intent})..."):
-        answer = generator.generate_answer(query, retrieved_chunks)
 
-    # 3. Bot response
     with st.chat_message("assistant"):
         st.markdown(answer)
         with st.expander("View Retrieved Sources"):
             for src in retrieved_chunks:
                 st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
-    
-    st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
 
-    return answer
-
-if query:
-    rag(query)
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": answer,
+        "sources": retrieved_chunks
+    })
 
 # Sidebar metrics
 with st.sidebar:
