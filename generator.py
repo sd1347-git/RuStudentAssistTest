@@ -1,5 +1,8 @@
 import os
 from openai import OpenAI
+from opentelemetry import trace
+
+tracer = trace.get_tracer(__name__)
 
 # Setup API Key for Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -30,16 +33,24 @@ class RAGGenerator:
     def __init__(self):
         self.model_name = MODEL_NAME
 
+    @tracer.chain  # ✅ Manually creates a span since OpenAIInstrumentor won't catch Groq
     def generate_answer(self, query, retrieved_chunks):
         if not client:
-            return "Please set the OPENAI_API_KEY environment variable to enable answer generation."
+            return "Please set the GROQ_API_KEY environment variable to enable answer generation."
 
         context_parts = []
         for i, chunk in enumerate(retrieved_chunks):
             context_parts.append(f"--- Document {i+1} ---\n{chunk['metadata_prefix']}{chunk['text']}\n")
-        
+
         context_str = "\n".join(context_parts)
         prompt = PROMPT_TEMPLATE.format(context_str=context_str, query=query)
+
+        # ✅ Manually enrich the span with useful metadata
+        current_span = trace.get_current_span()
+        current_span.set_attribute("llm.model", self.model_name)
+        current_span.set_attribute("llm.provider", "groq")
+        current_span.set_attribute("llm.query", query)
+        current_span.set_attribute("llm.num_chunks", len(retrieved_chunks))
 
         try:
             response = client.chat.completions.create(
@@ -47,8 +58,13 @@ class RAGGenerator:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0
             )
-            return response.choices[0].message.content
+            answer = response.choices[0].message.content
+
+            # ✅ Log the output to the span as well
+            current_span.set_attribute("llm.response", answer[:500])  # Truncated to avoid size limits
+            return answer
         except Exception as e:
+            current_span.record_exception(e)  # ✅ Exceptions will appear in Phoenix too
             return f"Error during generation: {e}"
 
 if __name__ == "__main__":
