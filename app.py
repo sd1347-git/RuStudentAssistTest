@@ -70,7 +70,7 @@ def rag(query:str) -> str:
     return answer
 
 if query:
-    rag(answer)
+    rag(query)
 
 # Sidebar metrics
 with st.sidebar:
