@@ -68,52 +68,63 @@ for msg in st.session_state.messages:
 query = st.chat_input("Ask a question (e.g. 'Who is the contact for MITA?')")
 
 def get_rutgers_answer(user_query: str):
-    if query:
-        # 1. User messages
-        st.session_state.messages.append({"role": "user", "content": query})
+    if user_query:
+        # 1. Add user message to chat UI
+        st.session_state.messages.append({"role": "user", "content": user_query})
         with st.chat_message("user"):
-            st.markdown(query)
+            st.markdown(user_query)
   
-        # WRAP EVERYTHING IN THE SESSION CONTEXT
+        # 2. Start Tracing
         with using_session(st.session_state.session_id):
+            # We use a try/finally to ensure the span ALWAYS closes and sends status
             with tracer.start_as_current_span(
                 "Rutgers_Assistant_Workflow", 
                 attributes={
                     "openinference.span.kind": "CHAIN",
-                    "input.value": query,  # <--- Records the question at the start
+                    "input.value": user_query,
                     "session.id": st.session_state.session_id
                 }
             ) as root_span:
-                
-                # 2. Process query
-                with st.spinner("Searching specific knowledge base..."):
-                    try:
+                try:
+                    # Search
+                    with st.spinner("Searching knowledge base..."):
                         retriever, generator = load_system()
-                    except FileNotFoundError:
-                        root_span.set_status(StatusCode.ERROR, "Missing index files")
-                        st.error("Error: Missing index files.")
-                        st.stop()
-                    
-                    retrieved_chunks, intent = retriever.retrieve(query, top_k=5)
-                    context_text = "\n\n".join([c['text'] for c in retrieved_chunks])
-                    root_span.set_attribute("retrieval.documents", context_text)
+                        retrieved_chunks, intent = retriever.retrieve(user_query, top_k=5)
+                        
+                        # Record documents for the Evaluator
+                        context_text = "\n\n".join([c['text'] for c in retrieved_chunks])
+                        root_span.set_attribute("retrieval.documents", context_text)
                 
-                with st.spinner(f"Generating answer (Router detected intent: {intent})..."):
-                    # Generate the answer FIRST
-                    answer = generator.generate_answer(query, retrieved_chunks)
-                    
-                    # NOW we can record it because the 'answer' variable actually exists!
-                    root_span.set_attribute("output.value", answer)
-                    root_span.set_status(StatusCode.OK) # Turn the trace GREEN
-  
-        # 3. Bot response
+                    # Generate
+                    with st.spinner(f"Generating answer..."):
+                        answer = generator.generate_answer(user_query, retrieved_chunks)
+                        
+                        # Record answer and set Green Status
+                        root_span.set_attribute("output.value", answer)
+                        root_span.set_status(StatusCode.OK) 
+                
+                except Exception as e:
+                    root_span.set_status(StatusCode.ERROR, str(e))
+                    answer = "I ran into an error. Please try again."
+                    retrieved_chunks = []
+                
+                finally:
+                    # This forces the "Root Span" to actually register in Phoenix
+                    pass 
+
+        # 3. Assistant response in UI
         with st.chat_message("assistant"):
             st.markdown(answer)
-            with st.expander("View Retrieved Sources"):
-                for src in retrieved_chunks:
-                    st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
+            if retrieved_chunks:
+                with st.expander("View Retrieved Sources"):
+                    for src in retrieved_chunks:
+                        st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
       
         st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
+        
+        # FINAL STEP: Push the trace to Arize immediately
+        tracer_provider.force_flush() 
+        
     return answer
 
 if query:
