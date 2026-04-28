@@ -1,16 +1,15 @@
 import os
+import json
 
 from openai import OpenAI
 from opentelemetry import trace
 from openinference.semconv.trace import SpanAttributes
 from opentelemetry.trace import Status, StatusCode
 
-
 # =========================
 # Tracer (NO register HERE)
 # =========================
 tracer = trace.get_tracer(__name__)
-
 
 # =========================
 # Groq / OpenAI-compatible client
@@ -27,7 +26,6 @@ client = (
 )
 
 MODEL_NAME = "llama-3.1-8b-instant"
-
 
 # =========================
 # Prompt Template
@@ -48,7 +46,6 @@ Context:
 Question:
 {query}
 """
-
 
 class RAGGenerator:
     def __init__(self):
@@ -76,7 +73,6 @@ class RAGGenerator:
                 for i, chunk in enumerate(retrieved_chunks):
                     prefix = chunk.get("metadata_prefix", "")
                     text = chunk.get("text", "")
-
                     context_parts.append(
                         f"--- Document {i+1} ---\n{prefix}\n{text}\n"
                     )
@@ -94,9 +90,10 @@ class RAGGenerator:
                 span.set_attribute("llm.prompt", prompt)
                 span.set_attribute("retrieval.context", context_str)
 
+                # ✅ Serialized to JSON string — required by OpenTelemetry
                 span.set_attribute(
                     "retrieval.documents",
-                    [
+                    json.dumps([
                         {
                             "id": str(i),
                             "text": c.get("text", ""),
@@ -105,7 +102,7 @@ class RAGGenerator:
                             },
                         }
                         for i, c in enumerate(retrieved_chunks)
-                    ],
+                    ])
                 )
 
                 # =========================
@@ -131,7 +128,6 @@ class RAGGenerator:
                 span.record_exception(e)
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 return f"Error during generation: {str(e)}"
-
 
 if __name__ == "__main__":
     print("Run app.py to use the RAG system.")
