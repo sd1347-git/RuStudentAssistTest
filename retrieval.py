@@ -18,9 +18,6 @@ tracer = register(
 # 1. Define the directory where your pkl and faiss files live
 OUTPUT_DIR = "output" 
 
-# 2. Get the tracer (will link to the provider initialized in app.py)
-tracer = trace.get_tracer(__name__)
-
 class Retriever:
     def __init__(self):
         # Load indexes and data using the defined OUTPUT_DIR
