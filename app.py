@@ -74,39 +74,38 @@ def get_rutgers_answer(user_query: str):
         with st.chat_message("user"):
             st.markdown(user_query)
   
-        # 2. Start the ONE span that matters for the Evaluator
+        # 2. We use a single flat span for the whole thing. 
+        # This makes it a "Root" that the Evaluator can see.
         with tracer.start_as_current_span(
             "Rutgers_Assistant_Workflow", 
             attributes={
                 "openinference.span.kind": "CHAIN",
                 "input.value": user_query,
             }
-        ) as root_span:
+        ) as span:
             try:
-                # Load your components
                 retriever, generator = load_system()
 
                 # Step A: Get Documents
                 with st.spinner("Searching Rutgers Knowledge Base..."):
                     retrieved_chunks, intent = retriever.retrieve(user_query)
                     
-                    # Attach context to the ROOT so the judge can see it
+                    # Attach context text directly to this span
                     context_text = "\n\n".join([c['text'] for c in retrieved_chunks])
-                    root_span.set_attribute("retrieval.documents", context_text)
+                    span.set_attribute("retrieval.documents", context_text)
                 
                 # Step B: Get Answer
                 with st.spinner("Generating Answer..."):
                     answer = generator.generate_answer(user_query, retrieved_chunks)
                     
-                    # Attach answer to the ROOT so the judge can see it
-                    root_span.set_attribute("output.value", answer)
+                    # Attach answer directly to this span
+                    span.set_attribute("output.value", answer)
                 
                 # Step C: Success!
-                root_span.set_status(StatusCode.OK)
+                span.set_status(StatusCode.OK)
 
             except Exception as e:
-                # If it breaks, record why
-                root_span.set_status(StatusCode.ERROR, str(e))
+                span.set_status(StatusCode.ERROR, str(e))
                 answer = f"Technical error: {str(e)}"
                 retrieved_chunks = []
 
@@ -120,10 +119,10 @@ def get_rutgers_answer(user_query: str):
       
         st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
         
-        # Force the data to Phoenix immediately
+        # 4. THE MOST IMPORTANT PART FOR CLOUD
         tracer_provider.force_flush()
         import time
-        time.sleep(1) # Give the Cloud network 1 second to ship the data to Arize
+        time.sleep(2) # Increased to 2 seconds for Streamlit Cloud stability
         
     return answer
 
