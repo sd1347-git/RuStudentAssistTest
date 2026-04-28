@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 import uuid
 import time
 
@@ -8,94 +9,107 @@ from generator import RAGGenerator
 from phoenix.otel import register
 from openinference.instrumentation.openai import OpenAIInstrumentor
 from openinference.semconv.trace import SpanAttributes
-
 from opentelemetry import trace as otel_trace
 from opentelemetry.trace import Status, StatusCode
 
-
 # =========================
-# 1. Phoenix Initialization (ONLY ONCE)
+# 1. Phoenix Initialization
 # =========================
 @st.cache_resource
 def init_phoenix():
-    api_key = st.secrets.get("PHOENIX_API_KEY")
+    try:
+        api_key = st.secrets["PHOENIX_API_KEY"]  # Fails loudly if missing
 
-    tracer_provider = register(
-        project_name="RU_Student_Assistant_Test",
-        endpoint="https://app.phoenix.arize.com/v1/traces",
-        api_key=api_key,
-    )
+        # Environment variables — most reliable for Phoenix Cloud
+        os.environ["PHOENIX_API_KEY"] = api_key
+        os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={api_key}"
+        os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
 
-    OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
-    return tracer_provider
+        tracer_provider = register(
+            project_name="RU_Student_Assistant_Test",  # Must match Phoenix Cloud exactly
+        )
 
+        OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
+        return tracer_provider
+
+    except Exception as e:
+        st.error(f"❌ Phoenix initialization failed: {e}")
+        raise
 
 tracer_provider = init_phoenix()
 tracer = otel_trace.get_tracer(__name__)
 
-
 # =========================
-# 2. Load RAG components
+# 2. Load RAG Components
 # =========================
 @st.cache_resource
 def load_system():
-    return Retriever(), RAGGenerator()
-
-
-retriever, generator = load_system()
-
+    retriever = Retriever()
+    generator = RAGGenerator()
+    return retriever, generator
 
 # =========================
-# 3. Streamlit setup
+# 3. Streamlit Setup
 # =========================
 st.set_page_config(page_title="RBS Student Life Assistant", page_icon="🛡️")
+
 st.title("Student Life Assistant for Rutgers Business School 🛡️")
+st.markdown("Ask questions about RBS contacts, events, majors, and student life! Powered by Hybrid Retrieval (FAISS + BM25) and OpenAI.")
 
-
-# Persistent session ID (CRITICAL FIX)
+# Persistent session ID for trace grouping
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-
 # =========================
-# 4. Chat history UI
+# 4. Chat History UI
 # =========================
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-
-
-query = st.chat_input("Ask a question...")
-
+        if "sources" in msg and msg["sources"]:
+            with st.expander("View Retrieved Sources"):
+                for src in msg["sources"]:
+                    st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
 
 # =========================
-# 5. Main RAG pipeline
+# 5. Chat Input
 # =========================
-def run_rag(user_query: str):
-    st.session_state.messages.append({"role": "user", "content": user_query})
+query = st.chat_input("Ask a question (e.g. 'Who is the contact for MITA?')")
 
+# =========================
+# 6. Main RAG Pipeline
+# =========================
+if query:
+    # User message
+    st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
-        st.markdown(user_query)
+        st.markdown(query)
 
     # ROOT TRACE (full workflow)
     with tracer.start_as_current_span(
         "rag.workflow",
         attributes={
             "openinference.span.kind": "CHAIN",
-            SpanAttributes.INPUT_VALUE: user_query,
+            SpanAttributes.INPUT_VALUE: query,
             "session.id": st.session_state.session_id,
         },
     ) as span:
 
         try:
             # -------------------------
-            # Retrieval step
+            # Retrieval Step
             # -------------------------
-            with st.spinner("Searching Rutgers Knowledge Base..."):
-                retrieved_chunks, intent = retriever.retrieve(user_query)
+            with st.spinner("Searching specific knowledge base..."):
+                try:
+                    retriever, generator = load_system()
+                except FileNotFoundError:
+                    st.error("Error: Missing index files. Please run `python ingest.py` first.")
+                    st.stop()
+
+                retrieved_chunks, intent = retriever.retrieve(query, top_k=5)
 
             context_text = "\n\n".join([c["text"] for c in retrieved_chunks])
 
@@ -103,24 +117,23 @@ def run_rag(user_query: str):
             span.set_attribute("retrieval.context", context_text)
 
             # -------------------------
-            # Generation step
+            # Generation Step
             # -------------------------
-            with st.spinner("Generating Answer..."):
+            with st.spinner(f"Generating answer (Router detected intent: {intent})..."):
                 with tracer.start_as_current_span(
                     "llm.generate",
                     attributes={
                         "openinference.span.kind": "LLM",
-                        SpanAttributes.INPUT_VALUE: user_query,
+                        SpanAttributes.INPUT_VALUE: query,
                         "retrieval.intent": intent,
                         "retrieval.context": context_text,
                     },
                 ) as llm_span:
 
-                    answer = generator.generate_answer(user_query, retrieved_chunks)
-
+                    answer = generator.generate_answer(query, retrieved_chunks)
                     llm_span.set_attribute(SpanAttributes.OUTPUT_VALUE, answer)
 
-            # finalize root span
+            # Finalize root span
             span.set_attribute(SpanAttributes.OUTPUT_VALUE, answer)
             span.set_status(Status(StatusCode.OK))
 
@@ -130,39 +143,25 @@ def run_rag(user_query: str):
             answer = f"Error: {str(e)}"
             retrieved_chunks = []
 
-
-    # =========================
-    # UI response rendering
-    # =========================
+    # -------------------------
+    # Bot Response UI
+    # -------------------------
     with st.chat_message("assistant"):
         st.markdown(answer)
-
         if retrieved_chunks:
             with st.expander("View Retrieved Sources"):
-                for i, src in enumerate(retrieved_chunks):
-                    st.caption(f"Document {i+1}")
-                    st.write(src.get("text", ""))
+                for src in retrieved_chunks:
+                    st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
 
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": answer,
+        "sources": retrieved_chunks,
+    })
 
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": answer,
-            "sources": retrieved_chunks,
-        }
-    )
-
-    # Flush traces (important for Streamlit Cloud)
-    tracer_provider.force_flush()
-    time.sleep(1)
-
-
-# =========================
-# 6. Trigger pipeline
-# =========================
-if query:
-    run_rag(query)
-
+    # Flush traces — critical for Streamlit Cloud
+    tracer_provider.force_flush(timeout_millis=10000)
+    time.sleep(2)
 
 # =========================
 # 7. Sidebar
@@ -173,4 +172,4 @@ with st.sidebar:
     st.markdown("- **Vector DB:** FAISS (Dense)")
     st.markdown("- **Keyword:** BM25 (Sparse)")
     st.markdown("- **Reranker:** Reciprocal Rank Fusion")
-    st.markdown("- **LLM:** llama-3.1-8b-instant (Groq)")
+    st.markdown("- **LLM:** gpt-4o-mini")
