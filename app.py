@@ -69,13 +69,12 @@ query = st.chat_input("Ask a question (e.g. 'Who is the contact for MITA?')")
 
 def get_rutgers_answer(user_query: str):
     if user_query:
-        # 1. UI Update
+        # 1. UI Setup
         st.session_state.messages.append({"role": "user", "content": user_query})
         with st.chat_message("user"):
             st.markdown(user_query)
   
-        # 2. We use a single flat span for the whole thing. 
-        # This makes it a "Root" that the Evaluator can see.
+        # 2. Simplified Tracing - No complex nesting
         with tracer.start_as_current_span(
             "Rutgers_Assistant_Workflow", 
             attributes={
@@ -86,27 +85,24 @@ def get_rutgers_answer(user_query: str):
             try:
                 retriever, generator = load_system()
 
-                # Step A: Get Documents
+                # Step A: Search
                 with st.spinner("Searching Rutgers Knowledge Base..."):
                     retrieved_chunks, intent = retriever.retrieve(user_query)
-                    
-                    # Attach context text directly to this span
                     context_text = "\n\n".join([c['text'] for c in retrieved_chunks])
+                    # CRITICAL: We attach these for the Evaluator
                     span.set_attribute("retrieval.documents", context_text)
                 
-                # Step B: Get Answer
+                # Step B: Generate
                 with st.spinner("Generating Answer..."):
                     answer = generator.generate_answer(user_query, retrieved_chunks)
-                    
-                    # Attach answer directly to this span
+                    # CRITICAL: We attach this for the Evaluator
                     span.set_attribute("output.value", answer)
                 
-                # Step C: Success!
                 span.set_status(StatusCode.OK)
 
             except Exception as e:
                 span.set_status(StatusCode.ERROR, str(e))
-                answer = f"Technical error: {str(e)}"
+                answer = f"I'm sorry, I encountered an error: {str(e)}"
                 retrieved_chunks = []
 
         # 3. Final UI Update
@@ -119,10 +115,8 @@ def get_rutgers_answer(user_query: str):
       
         st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
         
-        # 4. THE MOST IMPORTANT PART FOR CLOUD
+        # 4. FORCE THE EXPORT
         tracer_provider.force_flush()
-        import time
-        time.sleep(2) # Increased to 2 seconds for Streamlit Cloud stability
         
     return answer
 
