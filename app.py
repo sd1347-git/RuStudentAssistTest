@@ -61,12 +61,20 @@ if query:
     with st.chat_message("user"):
         st.markdown(query)
 
-    with st.spinner("Processing..."):
-        try:
-            answer, retrieved_chunks, intent = run_rag_pipeline(query)  # ✅ 3 values
-        except FileNotFoundError:
-            st.error("Missing index files. Please run `python ingest.py` first.")
-            st.stop()
+    with using_session(st.session_state.session_id):
+            with tracer.start_as_current_span(
+                "Rutgers_Assistant_Workflow",
+                attributes={
+                    "openinference.span.kind":"CHAIN",
+                    "session.id": st.session_state.session_id
+                }
+    
+            with st.spinner("Processing..."):
+                try:
+                    answer, retrieved_chunks, intent = run_rag_pipeline(query)  # ✅ 3 values
+                except FileNotFoundError:
+                    st.error("Missing index files. Please run `python ingest.py` first.")
+                    st.stop()
 
     with st.chat_message("assistant"):
         st.markdown(answer)
