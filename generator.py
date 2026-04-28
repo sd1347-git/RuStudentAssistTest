@@ -1,74 +1,137 @@
 import os
+
 from openai import OpenAI
-from opentelemetry import trace # Changed from phoenix.otel import register
-from phoenix.otel import register
-import streamlit as st
+from opentelemetry import trace
+from openinference.semconv.trace import SpanAttributes
+from opentelemetry.trace import Status, StatusCode
 
-tracer = register(
-    project_name="RU_Student_Assistant_Test",
-    endpoint="https://app.phoenix.arize.com/v1/traces",
-    api_key=st.secrets.get("PHOENIX_API_KEY")
-).get_tracer(__name__)
 
-# Setup API Key for Groq
+# =========================
+# Tracer (NO register HERE)
+# =========================
+tracer = trace.get_tracer(__name__)
+
+
+# =========================
+# Groq / OpenAI-compatible client
+# =========================
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-client = OpenAI(
-    api_key=GROQ_API_KEY,
-    base_url="https://api.groq.com/openai/v1"
-) if GROQ_API_KEY else None
 
-MODEL_NAME = 'llama-3.1-8b-instant'
+client = (
+    OpenAI(
+        api_key=GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1",
+    )
+    if GROQ_API_KEY
+    else None
+)
 
-PROMPT_TEMPLATE = """You are the "Student Life Assistant for Rutgers Business School".
-Your task is to answer the user's question using ONLY the provided contextual documents below. 
+MODEL_NAME = "llama-3.1-8b-instant"
 
-Instructions:
-1. Try to answer the question using ONLY the knowledge provided in the Context.
-2. If the Context DOES NOT contain the answer, EXPLICITLY state: "I don't have information about that in my current database." Do NOT hallucinate.
-3. Keep the answer concise and direct.
-4. MUST INCLUDE CITATIONS: Cite the source URL or File that your answer came from at the end of the sentence or block, exactly as [Source: <url/file>].
+
+# =========================
+# Prompt Template
+# =========================
+PROMPT_TEMPLATE = """
+You are the "Student Life Assistant for Rutgers Business School".
+
+You MUST follow these rules:
+1. Use ONLY the provided context.
+2. If the answer is not in the context, say:
+   "I don't have information about that in my current database."
+3. Be concise and factual.
+4. Always cite sources like [Source: file/url].
 
 Context:
 {context_str}
 
-User Question:
+Question:
 {query}
 """
+
 
 class RAGGenerator:
     def __init__(self):
         self.model_name = MODEL_NAME
 
-    def generate_answer(self, query, retrieved_chunks):
-        # This will now correctly nest under the Workflow in app.py
-        with tracer.start_as_current_span("Generator.generate") as span:
-            if not client:
-                return "Please set the GROQ_API_KEY environment variable."
+    def generate_answer(self, query: str, retrieved_chunks: list):
 
-            context_parts = []
-            for i, chunk in enumerate(retrieved_chunks):
-                context_parts.append(f"--- Document {i+1} ---\n{chunk['metadata_prefix']}{chunk['text']}\n")
-            
-            context_str = "\n".join(context_parts)
-            prompt = PROMPT_TEMPLATE.format(context_str=context_str, query=query)
-
-            span.set_attribute("input.value", query)
-            span.set_attribute("llm.prompt", prompt) 
+        with tracer.start_as_current_span(
+            "llm.generate_answer",
+            attributes={
+                SpanAttributes.INPUT_VALUE: query,
+                "llm.model": self.model_name,
+            },
+        ) as span:
 
             try:
+                if not client:
+                    raise ValueError("GROQ_API_KEY is not set.")
+
+                # =========================
+                # Build context
+                # =========================
+                context_parts = []
+
+                for i, chunk in enumerate(retrieved_chunks):
+                    prefix = chunk.get("metadata_prefix", "")
+                    text = chunk.get("text", "")
+
+                    context_parts.append(
+                        f"--- Document {i+1} ---\n{prefix}\n{text}\n"
+                    )
+
+                context_str = "\n".join(context_parts)
+
+                prompt = PROMPT_TEMPLATE.format(
+                    context_str=context_str,
+                    query=query,
+                )
+
+                # =========================
+                # Attach RAG context for Arize
+                # =========================
+                span.set_attribute("llm.prompt", prompt)
+                span.set_attribute("retrieval.context", context_str)
+
+                span.set_attribute(
+                    "retrieval.documents",
+                    [
+                        {
+                            "id": str(i),
+                            "text": c.get("text", ""),
+                            "metadata": {
+                                "category": c.get("category", ""),
+                            },
+                        }
+                        for i, c in enumerate(retrieved_chunks)
+                    ],
+                )
+
+                # =========================
+                # LLM Call
+                # =========================
                 response = client.chat.completions.create(
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0
+                    temperature=0.0,
                 )
+
                 answer = response.choices[0].message.content
-                
-                span.set_attribute("output.value", answer)
+
+                # =========================
+                # Output tracking
+                # =========================
+                span.set_attribute(SpanAttributes.OUTPUT_VALUE, answer)
+                span.set_status(Status(StatusCode.OK))
+
                 return answer
-                
+
             except Exception as e:
                 span.record_exception(e)
-                return f"Error during generation: {e}"
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                return f"Error during generation: {str(e)}"
+
 
 if __name__ == "__main__":
-    print("Run app.py to interact with the generator.")
+    print("Run app.py to use the RAG system.")
