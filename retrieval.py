@@ -7,7 +7,7 @@ import streamlit as st
 from phoenix.otel import register
 
 tracer_provider = register(
-  project_name="dataset-evaluator-ce7f0780fd136b682bafdec3",
+  project_name="RU_Student_Assistant_Test",
 )
 
 tracer = tracer_provider.get_tracer(__name__)
