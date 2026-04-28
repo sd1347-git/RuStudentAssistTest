@@ -3,15 +3,13 @@ import os
 from retrieval import Retriever
 from generator import RAGGenerator
 from phoenix.otel import register
-from openinference.instrumentation.openai import OpenAIInstrumentor
+from opentelemetry import trace
 
 tracer_provider = register(    
     project_name = "RU_Student_Assistant_Test",
 )
 
 tracer = tracer_provider.get_tracer(__name__)
-
-OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
 
 # Initialize components
 @st.cache_resource
