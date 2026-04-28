@@ -2,6 +2,13 @@ import streamlit as st
 import os
 from retrieval import Retriever
 from generator import RAGGenerator
+from phoenix.otel import register
+
+tracer_provider = register(    
+    project_name = "RU_Student_Assistant_Test",
+)
+
+tracer = tracer_provider.get_tracer(__name__)
 
 # Initialize components
 @st.cache_resource
@@ -31,7 +38,8 @@ for msg in st.session_state.messages:
 # Chat Input
 query = st.chat_input("Ask a question (e.g. 'Who is the contact for MITA?')")
 
-if query:
+@tracer.chain
+def rag(query:str) -> str:
     # 1. User messages
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
@@ -58,6 +66,11 @@ if query:
                 st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
     
     st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
+
+    return answer
+
+if query:
+    rag(answer)
 
 # Sidebar metrics
 with st.sidebar:
