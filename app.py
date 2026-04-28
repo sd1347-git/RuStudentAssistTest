@@ -1,80 +1,54 @@
 import streamlit as st
 import os
+import uuid
+import time
 from retrieval import Retriever
 from generator import RAGGenerator
 from phoenix.otel import register
 from openinference.instrumentation.openai import OpenAIInstrumentor
-import uuid
-from openinference.instrumentation import using_session
-from opentelemetry.trace import StatusCode
 from opentelemetry import trace as otel_trace
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.trace import StatusCode
 
 # 1. Initialize Phoenix for the Cloud
 api_key = st.secrets.get("PHOENIX_API_KEY")
 project_name = "RU_Student_Assistant_Test"
 
+# We use the register tool but keep a reference to the provider
 tracer_provider = register(
     project_name=project_name,
     endpoint="https://app.phoenix.arize.com/v1/traces",
     api_key=api_key,
 )
 
-# FORCE immediate export (Critical for Streamlit Cloud)
 OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
 tracer = otel_trace.get_tracer(__name__)
 
-
-# Initialize a persistent session ID for the user
-if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
-
-# No more subprocess needed! 
-# The app will just check if the folder you uploaded is there.
-if not os.path.exists("output"):
-    st.error("Index folder not found. Please ensure 'output' is uploaded to GitHub.")
-else:
-    # Initialize your retriever using the files in the output folder
-    # retriever = Retriever(index_path="output")
-    pass
-
-# Initialize components
+# --- Component Loading ---
 @st.cache_resource
 def load_system():
-    # Only loads once
-    retriever = Retriever()
-    generator = RAGGenerator()
-    return retriever, generator
+    return Retriever(), RAGGenerator()
 
+# --- Page Config ---
 st.set_page_config(page_title="RBS Student Life Assistant", page_icon="🛡️")
-
 st.title("Student Life Assistant for Rutgers Business School 🛡️")
-st.markdown("Ask questions about RBS contacts, events, majors, and student life! Powered by Hybrid Retrieval (FAISS + BM25) and OpenAI.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Show previous messages
+# --- UI Loop ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-        if "sources" in msg and msg["sources"]:
-            with st.expander("View Retrieved Sources"):
-                for src in msg["sources"]:
-                    st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
 
-# Chat Input
-query = st.chat_input("Ask a question (e.g. 'Who is the contact for MITA?')")
+query = st.chat_input("Ask a question...")
 
 def get_rutgers_answer(user_query: str):
     if user_query:
-        # 1. UI Setup
         st.session_state.messages.append({"role": "user", "content": user_query})
         with st.chat_message("user"):
             st.markdown(user_query)
   
-        # 2. Simplified Tracing - No complex nesting
+        # START TRACE
         with tracer.start_as_current_span(
             "Rutgers_Assistant_Workflow", 
             attributes={
@@ -89,13 +63,11 @@ def get_rutgers_answer(user_query: str):
                 with st.spinner("Searching Rutgers Knowledge Base..."):
                     retrieved_chunks, intent = retriever.retrieve(user_query)
                     context_text = "\n\n".join([c['text'] for c in retrieved_chunks])
-                    # CRITICAL: We attach these for the Evaluator
                     span.set_attribute("retrieval.documents", context_text)
                 
                 # Step B: Generate
                 with st.spinner("Generating Answer..."):
                     answer = generator.generate_answer(user_query, retrieved_chunks)
-                    # CRITICAL: We attach this for the Evaluator
                     span.set_attribute("output.value", answer)
                 
                 span.set_status(StatusCode.OK)
@@ -105,7 +77,7 @@ def get_rutgers_answer(user_query: str):
                 answer = f"I'm sorry, I encountered an error: {str(e)}"
                 retrieved_chunks = []
 
-        # 3. Final UI Update
+        # UI Update
         with st.chat_message("assistant"):
             st.markdown(answer)
             if retrieved_chunks:
@@ -115,8 +87,9 @@ def get_rutgers_answer(user_query: str):
       
         st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
         
-        # 4. FORCE THE EXPORT
+        # --- CRITICAL CLOUD FLUSH ---
         tracer_provider.force_flush()
+        time.sleep(2) # Network grace period for Streamlit Cloud
         
     return answer
 
