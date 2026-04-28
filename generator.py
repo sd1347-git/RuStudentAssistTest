@@ -1,3 +1,4 @@
+from tracing import tracer
 import os
 from openai import OpenAI
 from opentelemetry import trace
