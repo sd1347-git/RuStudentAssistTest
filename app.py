@@ -197,5 +197,3 @@ with st.sidebar:
     st.markdown("- **Reranker:** Reciprocal Rank Fusion")
 
     st.markdown("- **LLM:** gpt-4o-mini")
-
-    "
