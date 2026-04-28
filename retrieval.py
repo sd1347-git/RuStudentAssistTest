@@ -4,19 +4,17 @@ import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
 import streamlit as st
-from phoenix.otel import register
+from opentelemetry import trace
 
-tracer_provider = register(
-  project_name="RU_Student_Assistant_Test",
-)
+# 1. Define the directory where your pkl and faiss files live
+OUTPUT_DIR = "output" 
 
-tracer = tracer_provider.get_tracer(__name__)
-
-OUTPUT_DIR = "output"
+# 2. Get the tracer (will link to the provider initialized in app.py)
+tracer = trace.get_tracer(__name__)
 
 class Retriever:
     def __init__(self):
-        # Load indexes and data
+        # Load indexes and data using the defined OUTPUT_DIR
         self.chunk_data = pickle.load(open(os.path.join(OUTPUT_DIR, "chunked_data.pkl"), "rb"))
         self.bm25 = pickle.load(open(os.path.join(OUTPUT_DIR, "bm25_index.pkl"), "rb"))
         self.faiss_index = faiss.read_index(os.path.join(OUTPUT_DIR, "vector_index.faiss"))
@@ -48,17 +46,16 @@ class Retriever:
                 scores[idx] = 0.0
             scores[idx] += 1 / (k + rank + 1)
             
-        # Sort by RRF score descending
         sorted_indices = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
         return sorted_indices
       
     def retrieve(self, query, top_k=5, router_override=True):
-        # 2. Wrap the whole search in a Span
+        # This span nests under the Master Workflow in app.py
         with tracer.start_as_current_span("Retriever.retrieve") as span:
-            span.set_attribute("input.value", query) # Records question
+            span.set_attribute("input.value", query)
             
             intent = self.query_router(query)
-            span.set_attribute("retrieval.intent", intent) # Records detected intent
+            span.set_attribute("retrieval.intent", intent)
             
             # 1. Sparse Search (BM25)
             tokenized_query = query.lower().split()
@@ -82,7 +79,7 @@ class Retriever:
 
             results = [self.chunk_data[i] for i in final_indices]
             
-            # 3. Tag the results so you can see them in the "Waterfall"
+            # Add results to attributes for the trace view
             span.set_attribute("retrieval.documents", "\n\n".join([c['text'] for c in results]))
             
             return results, intent
