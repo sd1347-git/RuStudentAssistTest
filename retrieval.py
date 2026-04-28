@@ -2,27 +2,44 @@ import os
 import pickle
 import numpy as np
 import faiss
+
 from sentence_transformers import SentenceTransformer
-import streamlit as st
 from opentelemetry import trace
-from phoenix.otel import register
+from openinference.semconv.trace import SpanAttributes
+from opentelemetry.trace import Status, StatusCode
 
-# 1. DEFINE THE DIR (Crucial or the app crashes immediately)
-OUTPUT_DIR = "output" 
 
+# =========================
+# Tracer (IMPORTANT: NO register() here)
+# =========================
 tracer = trace.get_tracer(__name__)
+
+
+OUTPUT_DIR = "output"
+
 
 class Retriever:
     def __init__(self):
-        # Load indexes and data using the defined OUTPUT_DIR
-        # These will look in the "output" folder in your GitHub repo
-        self.chunk_data = pickle.load(open(os.path.join(OUTPUT_DIR, "chunked_data.pkl"), "rb"))
-        self.bm25 = pickle.load(open(os.path.join(OUTPUT_DIR, "bm25_index.pkl"), "rb"))
-        self.faiss_index = faiss.read_index(os.path.join(OUTPUT_DIR, "vector_index.faiss"))
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.chunk_data = pickle.load(
+            open(os.path.join(OUTPUT_DIR, "chunked_data.pkl"), "rb")
+        )
 
-    def query_router(self, query):
+        self.bm25 = pickle.load(
+            open(os.path.join(OUTPUT_DIR, "bm25_index.pkl"), "rb")
+        )
+
+        self.faiss_index = faiss.read_index(
+            os.path.join(OUTPUT_DIR, "vector_index.faiss")
+        )
+
+        self.model = SentenceTransformer("all-MiniLM-L6-v2")
+
+    # =========================
+    # Intent Router
+    # =========================
+    def query_router(self, query: str):
         q = query.lower()
+
         if any(term in q for term in ["contact", "email", "reach out", "coordinator"]):
             return "contacts"
         elif any(term in q for term in ["event", "this week", "seminar", "fair"]):
@@ -33,60 +50,120 @@ class Retriever:
             return "student_life"
         return "general"
 
+    # =========================
+    # Reciprocal Rank Fusion
+    # =========================
     def reciprocal_rank_fusion(self, dense_results, sparse_results, k=60):
         scores = {}
+
         for rank, idx in enumerate(dense_results):
-            if idx not in scores: scores[idx] = 0.0
-            scores[idx] += 1 / (k + rank + 1)
+            scores[idx] = scores.get(idx, 0.0) + 1 / (k + rank + 1)
+
         for rank, idx in enumerate(sparse_results):
-            if idx not in scores: scores[idx] = 0.0
-            scores[idx] += 1 / (k + rank + 1)
+            scores[idx] = scores.get(idx, 0.0) + 1 / (k + rank + 1)
+
         return sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
-      
-    def retrieve(self, query, top_k=5, router_override=True):
-        # This will now appear as its own "Root" in Arize
+
+    # =========================
+    # MAIN RETRIEVAL FUNCTION
+    # =========================
+    def retrieve(self, query: str, top_k: int = 5, router_override: bool = True):
+
         with tracer.start_as_current_span(
-            "Retriever.retrieve",
+            "retriever.retrieve",
             attributes={
-                "openinference.span.kind": "RETRIEVER",
-                "input.value": query,
-            }
+                SpanAttributes.INPUT_VALUE: query,
+                "retrieval.top_k": top_k,
+            },
         ) as span:
-            
-            intent = self.query_router(query)
-            span.set_attribute("retrieval.intent", intent)
-            
-            tokenized_query = query.lower().split()
-            bm25_scores = self.bm25.get_scores(tokenized_query)
-            
-            if router_override and intent != "general":
-                for i, chunk in enumerate(self.chunk_data):
-                    if chunk["category"] == intent:
-                        bm25_scores[i] *= 1.5 
-            
-            sparse_top_n = np.argsort(bm25_scores)[::-1][:15]
-            emb = self.model.encode([query])
-            distances, dense_top_n = self.faiss_index.search(emb, 15)
-            dense_top_n = dense_top_n[0]
 
-            fused_indices = self.reciprocal_rank_fusion(dense_top_n, sparse_top_n)
-            final_indices = fused_indices[:top_k]
-            results = [self.chunk_data[i] for i in final_indices]
-            
-            documents = []
-            for i, c in enumerate(results):
-                documents.append({
-                    "document.id": str(i),
-                    "document.content": c["text"],
-                    "document.metadata": {
-                        "title": c.get("title", ""),
-                        "category": c.get("category", ""),
-                    }
-                })
+            try:
+                # -------------------------
+                # Intent routing
+                # -------------------------
+                intent = self.query_router(query)
+                span.set_attribute("retrieval.intent", intent)
 
-            span.set_attribute("retrieval.documents", documents)
-            
-            return results, intent
+                # -------------------------
+                # BM25 retrieval span
+                # -------------------------
+                with tracer.start_as_current_span("retriever.bm25") as bm25_span:
+                    tokenized_query = query.lower().split()
+                    bm25_scores = self.bm25.get_scores(tokenized_query)
+
+                    if router_override and intent != "general":
+                        for i, chunk in enumerate(self.chunk_data):
+                            if chunk.get("category") == intent:
+                                bm25_scores[i] *= 1.5
+
+                    sparse_top_n = np.argsort(bm25_scores)[::-1][:15]
+
+                    bm25_span.set_attribute("retrieval.sparse.top_n", len(sparse_top_n))
+
+                # -------------------------
+                # Vector search span
+                # -------------------------
+                with tracer.start_as_current_span("retriever.vector_search") as vec_span:
+                    emb = self.model.encode([query])
+                    _, dense_top_n = self.faiss_index.search(emb, 15)
+                    dense_top_n = dense_top_n[0]
+
+                    vec_span.set_attribute("retrieval.dense.top_n", len(dense_top_n))
+
+                # -------------------------
+                # Fusion span
+                # -------------------------
+                with tracer.start_as_current_span("retriever.fusion") as fusion_span:
+                    fused_indices = self.reciprocal_rank_fusion(
+                        dense_top_n, sparse_top_n
+                    )
+
+                    final_indices = fused_indices[:top_k]
+
+                    fusion_span.set_attribute("retrieval.final_k", len(final_indices))
+
+                # -------------------------
+                # Build results
+                # -------------------------
+                results = []
+
+                for i, idx in enumerate(final_indices):
+                    chunk = self.chunk_data[idx]
+
+                    results.append(
+                        {
+                            "text": chunk.get("text", ""),
+                            "metadata_prefix": chunk.get("metadata_prefix", ""),
+                            "category": chunk.get("category", ""),
+                            "index": idx,
+                        }
+                    )
+
+                # -------------------------
+                # Attach documents for Phoenix RAG eval
+                # -------------------------
+                span.set_attribute(
+                    "retrieval.documents",
+                    [
+                        {
+                            "id": str(i),
+                            "text": r["text"],
+                            "metadata": {
+                                "category": r.get("category", ""),
+                            },
+                        }
+                        for i, r in enumerate(results)
+                    ],
+                )
+
+                span.set_status(Status(StatusCode.OK))
+                return results, intent
+
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                return [], "error"
+                
 if __name__ == "__main__":
     r = Retriever()
     res, intent = r.retrieve("Who is the contact for the MITA program?")
