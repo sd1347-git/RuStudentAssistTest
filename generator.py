@@ -1,49 +1,28 @@
 import os
-import json
-
 from openai import OpenAI
-from opentelemetry import trace
-from openinference.semconv.trace import SpanAttributes
-from opentelemetry.trace import Status, StatusCode
 
-# =========================
-# Tracer (NO register HERE)
-# =========================
-tracer = trace.get_tracer(__name__)
-
-# =========================
-# Groq / OpenAI-compatible client
-# =========================
+# Setup API Key for Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+client = OpenAI(
+    api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1"
+) if GROQ_API_KEY else None
 
-client = (
-    OpenAI(
-        api_key=GROQ_API_KEY,
-        base_url="https://api.groq.com/openai/v1",
-    )
-    if GROQ_API_KEY
-    else None
-)
+MODEL_NAME = 'llama-3.1-8b-instant'
 
-MODEL_NAME = "llama-3.1-8b-instant"
+PROMPT_TEMPLATE = """You are the "Student Life Assistant for Rutgers Business School".
+Your task is to answer the user's question using ONLY the provided contextual documents below. 
 
-# =========================
-# Prompt Template
-# =========================
-PROMPT_TEMPLATE = """
-You are the "Student Life Assistant for Rutgers Business School".
-
-You MUST follow these rules:
-1. Use ONLY the provided context.
-2. If the answer is not in the context, say:
-   "I don't have information about that in my current database."
-3. Be concise and factual.
-4. Always cite sources like [Source: file/url].
+Instructions:
+1. Try to answer the question using ONLY the knowledge provided in the Context.
+2. If the Context DOES NOT contain the answer (e.g. if asked about an event that isn't listed, or a major that isn't mentioned), EXPLICITLY state: "I don't have information about that in my current database." Do NOT hallucinate.
+3. Keep the answer concise and direct.
+4. MUST INCLUDE CITATIONS: Cite the source URL or File that your answer came from at the end of the sentence or block, exactly as [Source: <url/file>].
 
 Context:
 {context_str}
 
-Question:
+User Question:
 {query}
 """
 
@@ -51,83 +30,26 @@ class RAGGenerator:
     def __init__(self):
         self.model_name = MODEL_NAME
 
-    def generate_answer(self, query: str, retrieved_chunks: list):
+    def generate_answer(self, query, retrieved_chunks):
+        if not client:
+            return "Please set the OPENAI_API_KEY environment variable to enable answer generation."
 
-        with tracer.start_as_current_span(
-            "llm.generate_answer",
-            attributes={
-                SpanAttributes.INPUT_VALUE: query,
-                "llm.model": self.model_name,
-            },
-        ) as span:
+        context_parts = []
+        for i, chunk in enumerate(retrieved_chunks):
+            context_parts.append(f"--- Document {i+1} ---\n{chunk['metadata_prefix']}{chunk['text']}\n")
+        
+        context_str = "\n".join(context_parts)
+        prompt = PROMPT_TEMPLATE.format(context_str=context_str, query=query)
 
-            try:
-                if not client:
-                    raise ValueError("GROQ_API_KEY is not set.")
-
-                # =========================
-                # Build context
-                # =========================
-                context_parts = []
-
-                for i, chunk in enumerate(retrieved_chunks):
-                    prefix = chunk.get("metadata_prefix", "")
-                    text = chunk.get("text", "")
-                    context_parts.append(
-                        f"--- Document {i+1} ---\n{prefix}\n{text}\n"
-                    )
-
-                context_str = "\n".join(context_parts)
-
-                prompt = PROMPT_TEMPLATE.format(
-                    context_str=context_str,
-                    query=query,
-                )
-
-                # =========================
-                # Attach RAG context for Arize
-                # =========================
-                span.set_attribute("llm.prompt", prompt)
-                span.set_attribute("retrieval.context", context_str)
-
-                # ✅ Serialized to JSON string — required by OpenTelemetry
-                span.set_attribute(
-                    "retrieval.documents",
-                    json.dumps([
-                        {
-                            "id": str(i),
-                            "text": c.get("text", ""),
-                            "metadata": {
-                                "category": c.get("category", ""),
-                            },
-                        }
-                        for i, c in enumerate(retrieved_chunks)
-                    ])
-                )
-
-                # =========================
-                # LLM Call
-                # =========================
-                response = client.chat.completions.create(
-                    model=self.model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0,
-                )
-
-                answer = response.choices[0].message.content
-
-                # =========================
-                # Output tracking
-                # =========================
-                span.set_attribute(SpanAttributes.OUTPUT_VALUE, answer)
-                span.set_status(Status(StatusCode.OK))
-
-                return answer
-
-            except Exception as e:
-                span.record_exception(e)
-                span.set_status(Status(StatusCode.ERROR, str(e)))
-                return f"Error during generation: {str(e)}"
+        try:
+            response = client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Error during generation: {e}"
 
 if __name__ == "__main__":
-    print("Run app.py to use the RAG system.")
+    print("Run app.py to interact with the generator.")
