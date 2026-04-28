@@ -70,51 +70,62 @@ query = st.chat_input("Ask a question (e.g. 'Who is the contact for MITA?')")
 
 def get_rutgers_answer(user_query: str):
     if user_query:
+        # 1. Add user message to chat UI
         st.session_state.messages.append({"role": "user", "content": user_query})
         with st.chat_message("user"):
             st.markdown(user_query)
   
-        # 1. START THE MASTER SPAN
-        with tracer.start_as_current_span(
-            "Rutgers_Assistant_Workflow", 
-            attributes={
-                "openinference.span.kind": "CHAIN",
-                "input.value": user_query,
-            }
-        ) as root_span:
-            
-            # 2. GET THE CURRENT CONTEXT
-            # This is the "glue" that tells the other files: "You belong to me!"
-            current_context = otel_trace.set_span_in_context(root_span)
-
-            try:
-                retriever, generator = load_system()
-
-                # 3. RUN RETRIEVER (Force it into the context)
-                with otel_trace.use_span(root_span, context=current_context):
-                    retrieved_chunks, intent = retriever.retrieve(user_query, top_k=5)
+        # 2. Start Tracing
+        with using_session(st.session_state.session_id):
+            # We use a try/finally to ensure the span ALWAYS closes and sends status
+            with tracer.start_as_current_span(
+                "Rutgers_Assistant_Workflow", 
+                attributes={
+                    "openinference.span.kind": "CHAIN",
+                    "input.value": user_query,
+                    "session.id": st.session_state.session_id
+                }
+            ) as root_span:
+                try:
+                    # Search
+                    with st.spinner("Searching knowledge base..."):
+                        retriever, generator = load_system()
+                        retrieved_chunks, intent = retriever.retrieve(user_query, top_k=5)
+                        
+                        # Record documents for the Evaluator
+                        context_text = "\n\n".join([c['text'] for c in retrieved_chunks])
+                        root_span.set_attribute("retrieval.documents", context_text)
                 
-                context_text = "\n\n".join([c['text'] for c in retrieved_chunks])
-                root_span.set_attribute("retrieval.documents", context_text)
+                    # Generate
+                    with st.spinner(f"Generating answer..."):
+                        answer = generator.generate_answer(user_query, retrieved_chunks)
+                        
+                        # Record answer and set Green Status
+                        root_span.set_attribute("output.value", answer)
+                        root_span.set_status(StatusCode.OK) 
                 
-                # 4. RUN GENERATOR (Force it into the context)
-                with otel_trace.use_span(root_span, context=current_context):
-                    answer = generator.generate_answer(user_query, retrieved_chunks)
+                except Exception as e:
+                    root_span.set_status(StatusCode.ERROR, str(e))
+                    answer = "I ran into an error. Please try again."
+                    retrieved_chunks = []
                 
-                root_span.set_attribute("output.value", answer)
-                root_span.set_status(StatusCode.OK) 
+                finally:
+                    # This forces the "Root Span" to actually register in Phoenix
+                    pass 
 
-            except Exception as e:
-                root_span.set_status(StatusCode.ERROR, str(e))
-                answer = "Error occurred."
-                retrieved_chunks = []
-
-        # UI Logic
+        # 3. Assistant response in UI
         with st.chat_message("assistant"):
             st.markdown(answer)
-        
+            if retrieved_chunks:
+                with st.expander("View Retrieved Sources"):
+                    for src in retrieved_chunks:
+                        st.caption(f"{src['metadata_prefix']} \n\n {src['text']}")
+      
         st.session_state.messages.append({"role": "assistant", "content": answer, "sources": retrieved_chunks})
-        tracer_provider.force_flush()
+        
+        # FINAL STEP: Push the trace to Arize immediately
+        tracer_provider.force_flush() 
+        
     return answer
 
 if query:
