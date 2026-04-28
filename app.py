@@ -1,3 +1,4 @@
+from tracing import tracer_provider, tracer
 import streamlit as st
 import os
 from retrieval import Retriever
