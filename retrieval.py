@@ -5,6 +5,15 @@ import faiss
 from sentence_transformers import SentenceTransformer
 import streamlit as st
 from opentelemetry import trace
+from phoenix.otel import register # Bring this back
+import streamlit as st
+
+# Force it to register itself specifically
+tracer = register(
+    project_name="RU_Student_Assistant_Test",
+    endpoint="https://app.phoenix.arize.com/v1/traces",
+    api_key=st.secrets.get("PHOENIX_API_KEY")
+).get_tracer(__name__)
 
 # 1. Define the directory where your pkl and faiss files live
 OUTPUT_DIR = "output" 
