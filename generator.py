@@ -6,10 +6,10 @@ from opentelemetry import trace
 tracer = trace.get_tracer(__name__)
 
 # Setup API Key for Groq
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(
-    api_key=GROQ_API_KEY,
-) if GROQ_API_KEY else None
+    api_key=OPENAI_API_KEY,
+) if OPENAI_API_KEY else None
 
 MODEL_NAME = 'gpt-4o-mini'
 
