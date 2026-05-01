@@ -11,7 +11,7 @@ client = OpenAI(
     api_key=GROQ_API_KEY,
 ) if GROQ_API_KEY else None
 
-MODEL_NAME = 'gpt-4o'
+MODEL_NAME = 'gpt-4o-mini'
 
 PROMPT_TEMPLATE = """You are the "Student Life Assistant for Rutgers Business School".
 Your task is to answer the user's question using ONLY the provided contextual documents below. 
