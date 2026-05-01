@@ -9,10 +9,9 @@ tracer = trace.get_tracer(__name__)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client = OpenAI(
     api_key=GROQ_API_KEY,
-    base_url="https://api.groq.com/openai/v1"
 ) if GROQ_API_KEY else None
 
-MODEL_NAME = 'llama-3.1-8b-instant'
+MODEL_NAME = 'gpt-4o'
 
 PROMPT_TEMPLATE = """You are the "Student Life Assistant for Rutgers Business School".
 Your task is to answer the user's question using ONLY the provided contextual documents below. 
