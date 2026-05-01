@@ -52,7 +52,7 @@ def run_rag_pipeline(query: str):
     retriever, generator = load_system()
 
     with using_session(session_id):
-        retrieved_chunks, intent = retriever.retrieve(query)
+        retrieved_chunks, intent = retriever.retrieve(query, k=10)
         answer = generator.generate_answer(query, retrieved_chunks)
 
     current_span.set_attribute(SpanAttributes.OUTPUT_VALUE, answer)
