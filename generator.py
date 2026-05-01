@@ -6,7 +6,7 @@ from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindVal
 
 tracer = trace.get_tracer(__name__)
 
-# Setup API Key for Groq
+# Setup API Key for OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(
     api_key=OPENAI_API_KEY,
