@@ -6,7 +6,13 @@ from openinference.instrumentation import using_session
 from openinference.semconv.trace import SpanAttributes
 from retrieval import Retriever
 from generator import RAGGenerator
+from phoenix.otel import register
 
+register(
+    project_name="RU_Student_Assistant_Test",
+    auto_instrument=True,  # This is what enables the Cost Tracking!
+    batch=True,            # Sends traces in the background for better speed
+)
 
 # Session ID
 if "session_id" not in st.session_state:
