@@ -49,7 +49,7 @@ class Retriever:
         return sorted_indices
 
     @tracer.chain  # ✅ Span: full retrieval pipeline
-    def retrieve(self, query, top_k=5, router_override=True):
+    def retrieve(self, query, top_k=10, router_override=True):
         intent = self.query_router(query)
 
         current_span = trace.get_current_span()
@@ -65,13 +65,13 @@ class Retriever:
         if router_override and intent != "general":
             for i, chunk in enumerate(self.chunk_data):
                 if chunk["category"] == intent:
-                    bm25_scores[i] *= 1.5
+                    bm25_scores[i] *= 2.0
 
-        sparse_top_n = np.argsort(bm25_scores)[::-1][:15]
+        sparse_top_n = np.argsort(bm25_scores)[::-1][:30]
 
         # 2. Dense Search (FAISS)
         emb = self.model.encode([query])
-        distances, dense_top_n = self.faiss_index.search(emb, 15)
+        distances, dense_top_n = self.faiss_index.search(emb, 30)
         dense_top_n = dense_top_n[0]
 
         # 3. Combine via RRF
