@@ -2,6 +2,7 @@ from tracing import tracer
 import os
 from openai import OpenAI
 from opentelemetry import trace
+from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindValues
 
 tracer = trace.get_tracer(__name__)
 
@@ -29,23 +30,21 @@ User Question:
 {query}
 """
 
+
 class RAGGenerator:
     def __init__(self):
         self.model_name = MODEL_NAME
 
     @tracer.chain
     def generate_answer(self, query, retrieved_chunks):
-        if not client:
-            return "Please set the OPENAI_API_KEY."
-
-        context_str = "\n".join([f"--- Document {i+1} ---\n{c['text']}" for i, c in enumerate(retrieved_chunks)])
-        prompt = PROMPT_TEMPLATE.format(context_str=context_str, query=query)
-
+        # 1. Manually set the Span Kind to LLM so Phoenix knows to calculate cost
         current_span = trace.get_current_span()
+        current_span.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.LLM.value)
         
-        # 1. Use the standard attribute names Arize looks for
-        current_span.set_attribute("llm.model_name", self.model_name)
-        current_span.set_attribute("llm.provider", "openai")
+        # 2. Use the correct semantic names for the model and provider
+        current_span.set_attribute(SpanAttributes.LLM_MODEL_NAME, self.model_name)
+        current_span.set_attribute(SpanAttributes.LLM_PROVIDER, "openai")
+        current_span.set_attribute(SpanAttributes.INPUT_VALUE, query)
 
         try:
             response = client.chat.completions.create(
@@ -54,18 +53,15 @@ class RAGGenerator:
                 temperature=0.0
             )
             answer = response.choices[0].message.content
-
-            # 2. CAPTURE TOKENS (This is what enables Cost Tracking)
             usage = response.usage
-            current_span.set_attribute("llm.token_count.prompt", usage.prompt_tokens)
-            current_span.set_attribute("llm.token_count.completion", usage.completion_tokens)
-            current_span.set_attribute("llm.token_count.total", usage.total_tokens)
 
-            current_span.set_attribute("output.value", answer) 
+            # 3. Capture Tokens (The "Fuel" for the cost math)
+            current_span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_PROMPT, usage.prompt_tokens)
+            current_span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_COMPLETION, usage.completion_tokens)
+            current_span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_TOTAL, usage.total_tokens)
+
+            current_span.set_attribute(SpanAttributes.OUTPUT_VALUE, answer) 
             return answer
         except Exception as e:
             current_span.record_exception(e)
             return f"Error: {e}"
-
-if __name__ == "__main__":
-    print("Run app.py to interact with the generator.")
